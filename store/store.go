@@ -1,8 +1,10 @@
 package store
 
 import (
+	"context"
 	"fmt"
 	"sync"
+	"ticket-reservation/lock"
 	"ticket-reservation/model"
 	"time"
 )
@@ -10,15 +12,17 @@ import (
 var timeNow = time.Now
 
 type Store struct {
-	mu          sync.RWMutex
-	slots       map[string]*model.TimeSlot
+	mu           sync.RWMutex
+	slots        map[string]*model.TimeSlot
 	reservations map[string]*model.Reservation
+	locker       lock.Locker
 }
 
-func New() *Store {
+func New(locker lock.Locker) *Store {
 	return &Store{
 		slots:        make(map[string]*model.TimeSlot),
 		reservations: make(map[string]*model.Reservation),
+		locker:       locker,
 	}
 }
 
@@ -65,6 +69,15 @@ func (s *Store) ListSlots() []model.TimeSlot {
 }
 
 func (s *Store) Reserve(slotID string, quantity int, userID string) (*model.Reservation, error) {
+	ctx := context.Background()
+	lockKey := lock.SlotLockKey(slotID)
+
+	unlocker, err := lock.TryLock(ctx, s.locker, lockKey)
+	if err != nil {
+		return nil, fmt.Errorf("reservation failed: %w", err)
+	}
+	defer unlocker.Unlock(ctx)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -92,10 +105,28 @@ func (s *Store) Reserve(slotID string, quantity int, userID string) (*model.Rese
 }
 
 func (s *Store) CancelReservation(reservationID string) error {
+	ctx := context.Background()
+
+	s.mu.RLock()
+	res, ok := s.reservations[reservationID]
+	if !ok {
+		s.mu.RUnlock()
+		return fmt.Errorf("reservation not found: %s", reservationID)
+	}
+	slotID := res.SlotID
+	s.mu.RUnlock()
+
+	lockKey := lock.SlotLockKey(slotID)
+	unlocker, err := lock.TryLock(ctx, s.locker, lockKey)
+	if err != nil {
+		return fmt.Errorf("cancel failed: %w", err)
+	}
+	defer unlocker.Unlock(ctx)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	res, ok := s.reservations[reservationID]
+	res, ok = s.reservations[reservationID]
 	if !ok {
 		return fmt.Errorf("reservation not found: %s", reservationID)
 	}
