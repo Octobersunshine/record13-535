@@ -32,6 +32,10 @@ type CancelRequest struct {
 	ReservationID string `json:"reservation_id"`
 }
 
+type AdjustQuotaRequest struct {
+	Delta int `json:"delta"`
+}
+
 func (svc *ReservationService) CreateSlot(req CreateSlotRequest) (*model.TimeSlot, error) {
 	if err := validateTimeFormat(req.Date, req.StartTime, req.EndTime); err != nil {
 		return nil, err
@@ -87,6 +91,16 @@ func (svc *ReservationService) Cancel(reservationID string) error {
 		return fmt.Errorf("reservation_id is required")
 	}
 	return svc.store.CancelReservation(reservationID)
+}
+
+func (svc *ReservationService) AdjustQuota(slotID string, delta int) (*model.TimeSlot, error) {
+	if slotID == "" {
+		return nil, fmt.Errorf("slot_id is required")
+	}
+	if delta == 0 {
+		return nil, fmt.Errorf("delta cannot be zero")
+	}
+	return svc.store.AdjustQuota(slotID, delta)
 }
 
 func validateTimeFormat(date, start, end string) error {

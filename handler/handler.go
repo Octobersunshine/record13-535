@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"ticket-reservation/service"
 )
 
@@ -18,6 +19,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/slots", h.CreateSlot)
 	mux.HandleFunc("GET /api/slots", h.ListSlots)
 	mux.HandleFunc("GET /api/slots/{id}", h.GetSlot)
+	mux.HandleFunc("PATCH /api/slots/{id}/quota", h.AdjustQuota)
 	mux.HandleFunc("POST /api/reservations", h.Reserve)
 	mux.HandleFunc("DELETE /api/reservations/{id}", h.CancelReservation)
 }
@@ -76,6 +78,35 @@ func (h *Handler) CancelReservation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "cancelled"})
+}
+
+func (h *Handler) AdjustQuota(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req service.AdjustQuotaRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	slot, err := h.svc.AdjustQuota(id, req.Delta)
+	if err != nil {
+		status := http.StatusBadRequest
+		if isNotFound(err) {
+			status = http.StatusNotFound
+		}
+		writeError(w, status, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, slot)
+}
+
+func isNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "not found")
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {

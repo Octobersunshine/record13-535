@@ -158,6 +158,37 @@ func (s *Store) GetReservationsBySlot(slotID string) []model.Reservation {
 	return result
 }
 
+func (s *Store) AdjustQuota(slotID string, delta int) (*model.TimeSlot, error) {
+	ctx := context.Background()
+	lockKey := lock.SlotLockKey(slotID)
+
+	unlocker, err := lock.TryLock(ctx, s.locker, lockKey)
+	if err != nil {
+		return nil, fmt.Errorf("adjust quota failed: %w", err)
+	}
+	defer unlocker.Unlock(ctx)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	slot, ok := s.slots[slotID]
+	if !ok {
+		return nil, fmt.Errorf("time slot not found: %s", slotID)
+	}
+
+	newTotal := slot.Total + delta
+	if newTotal < slot.Reserved {
+		return nil, fmt.Errorf("cannot reduce quota below reserved count: new total %d, reserved %d", newTotal, slot.Reserved)
+	}
+	if newTotal < 0 {
+		return nil, fmt.Errorf("total quota cannot be negative")
+	}
+
+	slot.Total = newTotal
+	cp := *slot
+	return &cp, nil
+}
+
 func slotKey(date, start, end string) string {
 	return fmt.Sprintf("%s|%s|%s", date, start, end)
 }
